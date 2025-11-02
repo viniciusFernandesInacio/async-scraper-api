@@ -1,0 +1,105 @@
+version: "3.9"
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    env_file:
+      - .env
+    environment:
+      - RABBITMQ_URL=${RABBITMQ_URL:-amqp://guest:guest@rabbitmq:5672/}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      - QUEUE_NAME=${QUEUE_NAME:-scrape_tasks}
+      - RESULT_TTL_SECONDS=${RESULT_TTL_SECONDS:-3600}
+      - DATABASE_URL=${DATABASE_URL:-postgresql+psycopg://postgres:postgres@postgres:5432/scraper}
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+    depends_on:
+      rabbitmq:
+        condition: service_started
+      redis:
+        condition: service_started
+    develop:
+      watch:
+        - action: sync
+          path: ./app
+          target: /app/app
+        - action: sync
+          path: ./common
+          target: /app/common
+        - action: rebuild
+          path: requirements.txt
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    env_file:
+      - .env
+    environment:
+      - RABBITMQ_URL=${RABBITMQ_URL:-amqp://guest:guest@rabbitmq:5672/}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      - QUEUE_NAME=${QUEUE_NAME:-scrape_tasks}
+      - RESULT_TTL_SECONDS=${RESULT_TTL_SECONDS:-3600}
+      - DATABASE_URL=${DATABASE_URL:-postgresql+psycopg://postgres:postgres@postgres:5432/scraper}
+    depends_on:
+      rabbitmq:
+        condition: service_started
+      redis:
+        condition: service_started
+    restart: unless-stopped
+    develop:
+      watch:
+        - action: sync
+          path: ./worker
+          target: /app/worker
+        - action: sync
+          path: ./common
+          target: /app/common
+        - action: restart
+          path: ./worker
+        - action: restart
+          path: ./common
+        - action: rebuild
+          path: requirements.txt
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    environment:
+      - RABBITMQ_DEFAULT_USER=guest
+      - RABBITMQ_DEFAULT_PASS=guest
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    command: ["redis-server", "--appendonly", "no"]
+
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB:-scraper}
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-scraper}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  pgdata:
