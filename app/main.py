@@ -42,8 +42,6 @@ app = FastAPI(
     title="Async Scraper API",
     version="0.1.0",
     description=description,
-    contact={"name": "Async Scraper", "email": "dev@local"},
-    license_info={"name": "MIT"},
     openapi_tags=openapi_tags,
 )
 
