@@ -185,15 +185,3 @@ curl -s -X POST http://localhost:8000/scrape/batch \
 
 curl -s "http://localhost:8000/results/<id1>,<id2>"
 ```
-
-## Remover dados persistidos
-
-- Postgres utiliza um volume nomeado `pgdata` (montado em `/var/lib/postgresql/data`).
-- Parar os containers não apaga dados: `docker compose stop`.
-- Remover containers, rede e volumes (apaga dados):
-  - `docker compose down -v`
-- Remover apenas o volume do Postgres:
-  - Listar volumes: `docker volume ls`
-  - Remover: `docker volume rm <seu_projeto>_pgdata`
-- Subir novamente recria um volume vazio: `docker compose up --build`.
-- Observação: o Redis está sem persistência (`appendonly no`), então seu conteúdo é volátil e se perde ao parar/remover.
