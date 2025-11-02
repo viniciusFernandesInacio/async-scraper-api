@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual env
+.venv/
+venv/
+env/
+
+# Build/dist
+build/
+dist/
+*.egg-info/
+
+# Test/coverage
+.pytest_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# Env files
+.env
+.env.*
+!.env.example
+
+# IDE/OS
+.vscode/
+.idea/
+*.code-workspace
+.DS_Store
+Thumbs.db
+
+# Compose override
+docker-compose.override.yml
+
+# Caches genéricos
+.cache/
