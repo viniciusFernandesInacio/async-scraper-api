@@ -6,10 +6,10 @@ API para scraping assíncrono do Sintegra/GO utilizando filas (RabbitMQ) e cache
 
 - Swagger: `http://localhost:8000/docs`
 - `POST /scrape` — body: `{ "cnpj": "00006486000175" }` → retorna `task_id` e `status` inicial `queued`.
-- `GET /results/{task_id}` — retorna `status` (`queued|processing|completed|failed`) e, se concluído, o `result`.
+- `GET /results/{task_ids}` — retorna `status` e `result` para um `task_id` ou vários separados por vírgula.
 - `POST /scrape/batch` — body: `{ "cnpjs": ["00006486000175", "..."] }` → enfileira cada CNPJ e retorna `{cnpj, task_id, status}`.
-- `GET /results/batch?task_ids=<id1>&task_ids=<id2>` — consulta resultados de vários `task_id` de uma vez.
 - `GET /health` — status do serviço/Redis.
+- `GET /users/{cnpjs}` — consulta um ou mais CNPJs persistidos (separados por vírgula).
 
 ## Como rodar com Docker Compose
 
@@ -116,6 +116,21 @@ Eventos esperados: `http_request`, `task_queued`, `rabbitmq_publish`, `worker_st
     - `created_at` (datetime)
     - `updated_at` (datetime)
 
+### Remover dados persistidos (Postgres)
+
+- O Postgres usa um volume nomeado `pgdata` montado em `/var/lib/postgresql/data`.
+- Remover containers + volumes (apaga dados):
+  - `docker compose down -v`
+- Remover somente o volume do Postgres (PowerShell):
+  - `$proj = Split-Path -Leaf (Get-Location)`
+  - `docker volume rm "${proj}_pgdata"`
+- Remover somente o volume do Postgres (Git Bash):
+  - `proj=$(basename "$PWD"); docker volume rm "${proj}_pgdata"`
+- Nome explícito do volume no seu projeto atual (se o diretório for `async-scraper-api`):
+  - `docker volume rm async-scraper-api_pgdata`
+- Subir novamente recria um volume vazio: `docker compose up --build`.
+- Observação: o Redis está sem persistência (`appendonly no`), então seu conteúdo é volátil e se perde ao parar/remover.
+
 ## Orquestracao e Healthcheck
 
 - O `docker-compose.yml` define um healthcheck para o Postgres e faz `api` e `worker` aguardarem o banco ficar pronto antes de iniciar.
@@ -126,7 +141,7 @@ Eventos esperados: `http_request`, `task_queued`, `rabbitmq_publish`, `worker_st
 - `GET /metrics` — métricas básicas: contagem e latência média por rota.
 - Batch:
   - `POST /scrape/batch` — enfileira vários CNPJs.
-  - `GET /results/batch` — consulta vários `task_id` de uma vez.
+  - `GET /results/{task_ids}` — informe IDs separados por vírgula para consultar vários de uma vez.
 
 ## Exemplos de respostas
 
@@ -140,7 +155,7 @@ Eventos esperados: `http_request`, `task_queued`, `rabbitmq_publish`, `worker_st
 - `POST /scrape/batch`
   - 200: `{ "tasks": [ {"cnpj": "00006486000175", "task_id": "<uuid>", "status": "queued"}, ... ] }`
 
-- `GET /results/batch`
+- `GET /results/{task_ids}` (IDs separados por vírgula)
   - 200: `{ "results": [ {"task_id": "...", "status": "...", "cnpj": "...", "has_data": true|false, "result": {..}|null } ], "com_dados": [...], "sem_dados": [...] }`
 
 ## Guia rápido de uso da API
@@ -151,7 +166,7 @@ Eventos esperados: `http_request`, `task_queued`, `rabbitmq_publish`, `worker_st
   - `GET /results/{task_id}` para acompanhar status e obter `result` quando `completed`.
 - Como usar (batch):
   - `POST /scrape/batch` com `{ "cnpjs": ["00006486000175", "00012377000160"] }` → retorna lista com `{cnpj, task_id, status}`.
-  - `GET /results/batch?task_ids=<id1>&task_ids=<id2>` para consultar vários de uma vez.
+  - `GET /results/{task_id},{task_id2}` para consultar vários de uma vez.
 
 Exemplos (curl)
 
@@ -168,5 +183,17 @@ curl -s -X POST http://localhost:8000/scrape/batch \
   -H 'Content-Type: application/json' \
   -d '{"cnpjs":["00006486000175","00012377000160"]}'
 
-curl -s "http://localhost:8000/results/batch?task_ids=<id1>&task_ids=<id2>"
+curl -s "http://localhost:8000/results/<id1>,<id2>"
 ```
+
+## Remover dados persistidos
+
+- Postgres utiliza um volume nomeado `pgdata` (montado em `/var/lib/postgresql/data`).
+- Parar os containers não apaga dados: `docker compose stop`.
+- Remover containers, rede e volumes (apaga dados):
+  - `docker compose down -v`
+- Remover apenas o volume do Postgres:
+  - Listar volumes: `docker volume ls`
+  - Remover: `docker volume rm <seu_projeto>_pgdata`
+- Subir novamente recria um volume vazio: `docker compose up --build`.
+- Observação: o Redis está sem persistência (`appendonly no`), então seu conteúdo é volátil e se perde ao parar/remover.

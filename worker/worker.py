@@ -30,7 +30,7 @@ async def process_message(message: IncomingMessage) -> None:
 
         redis = redis_from_url(settings.redis_url, decode_responses=False)
         try:
-            from app.services.cache import Cache  # reuse simple helper
+            from app.services.cache import Cache 
 
             cache = Cache(redis, settings.result_ttl_seconds)
             await cache.set_status(task_id, "processing")
@@ -38,14 +38,14 @@ async def process_message(message: IncomingMessage) -> None:
             result = await asyncio.to_thread(fetch_cnpj_data, cnpj)
             has_data = bool(result)
             await cache.set_status(task_id, "completed", result)
-            # Persiste somente quando houver dados (tabela normalizada `usuario`) e se habilitado por env
+
             if has_data and settings.persist_to_db:
                 await asyncio.to_thread(upsert_usuario, cnpj, result)
                 logger.info("usuario_persisted", task_id=task_id, cnpj=cnpj, fields=len(result or {}))
             else:
                 logger.info("usuario_persist_skip", task_id=task_id, cnpj=cnpj, has_data=has_data, persist_to_db=settings.persist_to_db)
             logger.info("task_completed", task_id=task_id)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:  
             logger.exception("task_failed", task_id=task_id, cnpj=cnpj, error=str(exc))
             try:
                 if 'cache' in locals():
@@ -64,15 +64,13 @@ async def process_message(message: IncomingMessage) -> None:
 
 async def main() -> None:
     """Inicia o worker, declara a fila e consome mensagens continuamente."""
-    # Garante que a tabela exista quando a persistência estiver habilitada
     if settings.persist_to_db:
         await asyncio.to_thread(init_db)
-    # Conecta ao RabbitMQ com tentativas até ficar disponível
     connection = None
     while connection is None:
         try:
             connection = await connect_robust(settings.rabbitmq_url)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc: 
             logger.warning("rabbitmq_connect_retry", error=str(exc))
             await asyncio.sleep(5)
     channel = await connection.channel()

@@ -77,8 +77,9 @@ class BatchTaskItem(BaseModel):
     """Item de retorno de uma tarefa criada em lote."""
 
     cnpj: str
-    task_id: str
     status: str
+    task_id: str | None = None
+    error: str | None = None
 
 
 class BatchEnqueueResponse(BaseModel):
@@ -118,3 +119,10 @@ class UsuarioResponse(BaseModel):
     data_consulta: str | None = None
     created_at: str | None = None
     updated_at: str | None = None
+
+
+class UsuariosBatchResponse(BaseModel):
+    """Resposta para busca de varios usuarios em uma só chamada."""
+
+    encontrados: list[UsuarioResponse]
+    nao_encontrados: list[str]

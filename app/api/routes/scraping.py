@@ -6,7 +6,7 @@ import json
 import re
 import uuid
 
-from fastapi import APIRouter, Request, Query
+from fastapi import APIRouter, Request
 from app.api.schemas import (
     ScrapeRequest,
     TaskResponse,
@@ -61,24 +61,8 @@ async def create_scrape_task(request: Request, payload: ScrapeRequest) -> TaskRe
     except QueuePublishError as exc:
         await request.app.state.cache.set_status(task_id, status="failed", result={"error": exc.message})
         raise
-    request.app.logger.info("task_queued", task_id=task_id, cnpj=cnpj)  # type: ignore[attr-defined]
+    request.app.logger.info("task_queued", task_id=task_id, cnpj=cnpj)
     return TaskResponse(task_id=task_id, status="queued")
-
-
-@router.get(
-    "/results/{task_id}",
-    response_model=TaskResponse,
-    response_model_exclude_none=True,
-    summary="Consulta status/resultado da tarefa",
-)
-async def get_results(request: Request, task_id: str) -> TaskResponse:
-    data = await request.app.state.cache.get(task_id)
-    if data is None:
-        raise NotFoundError("Tarefa nao encontrada")
-    result = data.get("result")
-    has_data = bool(result)
-    cnpj = data.get("cnpj") or (result.get("cnpj") if isinstance(result, dict) else None)
-    return TaskResponse(task_id=task_id, status=data.get("status", "unknown"), result=result, cnpj=cnpj, has_data=has_data)
 
 
 @router.post(
@@ -91,7 +75,12 @@ async def get_results(request: Request, task_id: str) -> TaskResponse:
 async def create_scrape_batch(request: Request, payload: BatchScrapeRequest) -> BatchEnqueueResponse:
     tasks: list[BatchTaskItem] = []
     for raw in payload.cnpjs:
-        cnpj = _normalize_cnpj(raw)
+        try:
+            cnpj = _normalize_cnpj(raw)
+        except BadRequestError as exc:
+            request.app.logger.warning("batch_invalid_cnpj", raw_cnpj=raw, error=exc.message)
+            tasks.append(BatchTaskItem(cnpj=raw, status="invalid", error=exc.message))
+            continue
         task_id = str(uuid.uuid4())
         await request.app.state.cache.set_status(task_id, status="queued", extra={"cnpj": cnpj})
         try:
@@ -105,19 +94,31 @@ async def create_scrape_batch(request: Request, payload: BatchScrapeRequest) -> 
 
 
 @router.get(
-    "/results/batch",
-    response_model=BatchResultsResponse,
+    "/results/{task_ids}",
+    response_model=TaskResponse | BatchResultsResponse,
     response_model_exclude_none=True,
-    summary="Consulta resultados de varias tarefas",
+    summary="Consulta status/resultado de uma ou mais tarefas",
+    description="Envie um unico task_id ou varios separados por virgula.",
 )
-async def get_results_batch(request: Request, task_ids: list[str] = Query(..., description="Lista de task_ids")) -> BatchResultsResponse:
-    if not task_ids:
+async def get_results(request: Request, task_ids: str) -> TaskResponse | BatchResultsResponse:
+    ids = [tid.strip() for tid in task_ids.split(",") if tid.strip()]
+    if not ids:
         raise BadRequestError("Forneca ao menos um task_id")
-    raw_list = await request.app.state.redis.mget(task_ids)
+    if len(ids) == 1:
+        task_id = ids[0]
+        data = await request.app.state.cache.get(task_id)
+        if data is None:
+            raise NotFoundError("Tarefa nao encontrada")
+        result = data.get("result")
+        has_data = bool(result)
+        cnpj = data.get("cnpj") or (result.get("cnpj") if isinstance(result, dict) else None)
+        return TaskResponse(task_id=task_id, status=data.get("status", "unknown"), result=result, cnpj=cnpj, has_data=has_data)
+
+    raw_list = await request.app.state.redis.mget(ids)
     results: list[TaskResponse] = []
     com_dados: list[dict] = []
     sem_dados: list[dict] = []
-    for tid, raw in zip(task_ids, raw_list):
+    for tid, raw in zip(ids, raw_list):
         if not raw:
             results.append(TaskResponse(task_id=tid, status="unknown", result=None, cnpj=None, has_data=False))
             sem_dados.append({"task_id": tid, "cnpj": None})

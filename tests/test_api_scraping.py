@@ -6,8 +6,8 @@
 import json
 import pytest
 from types import SimpleNamespace
-from app.api.routes.scraping import create_scrape_task, get_results, create_scrape_batch, get_results_batch
-from app.api.schemas import ScrapeRequest, BatchScrapeRequest
+from app.api.routes.scraping import create_scrape_task, get_results, create_scrape_batch
+from app.api.schemas import ScrapeRequest, BatchScrapeRequest, BatchResultsResponse
 
 
 class FakeCache:
@@ -43,7 +43,11 @@ async def _noop_publish(task_id: str, cnpj: str) -> None:
 
 
 def _req_with_state(cache: FakeCache, redis: FakeRedis):
-    logger = SimpleNamespace(info=lambda *a, **k: None)
+    logger = SimpleNamespace(
+        info=lambda *a, **k: None,
+        warning=lambda *a, **k: None,
+        error=lambda *a, **k: None,
+    )
     return SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(cache=cache, redis=redis), logger=logger))
 
 
@@ -95,7 +99,8 @@ async def test_batch_endpoints(monkeypatch):
 
     for i, tid in enumerate(ids):
         await cache.set_status(tid, "completed", result={"cnpj": f"00.000.000/000{i}-00"}, extra={"cnpj": f"0000000000000{i}"})
-    res = await get_results_batch(req, ids)
+    res = await get_results(req, ",".join(ids))
+    assert isinstance(res, BatchResultsResponse)
     assert len(res.results) == 2
     assert len(res.com_dados) == 2
     assert len(res.sem_dados) == 0
@@ -147,14 +152,25 @@ async def test_create_scrape_task_publish_failure_marks_failed(monkeypatch):
 
 
 @pytest.mark.anyio
-async def test_batch_invalid_cnpj_raises(monkeypatch):
+async def test_batch_invalid_cnpj_returns_invalid_entry(monkeypatch):
     cache = FakeCache()
     redis = FakeRedis(cache.store)
+    monkeypatch.setattr("app.api.routes.scraping.publish_task", _noop_publish)
     req = _req_with_state(cache, redis)
-    from common.errors import BadRequestError
 
-    with pytest.raises(BadRequestError):
-        await create_scrape_batch(req, BatchScrapeRequest(cnpjs=["00006486000175", "123"]))
+    enq = await create_scrape_batch(req, BatchScrapeRequest(cnpjs=["00006486000175", "123"]))
+    assert len(enq.tasks) == 2
+    entries = {item.cnpj: item for item in enq.tasks}
+
+    valid = entries["00006486000175"]
+    assert valid.status == "queued"
+    assert valid.task_id is not None
+    assert valid.error is None
+
+    invalid = entries["123"]
+    assert invalid.status == "invalid"
+    assert invalid.task_id is None
+    assert invalid.error == "CNPJ deve ter 14 digitos"
 
 
 @pytest.mark.anyio
@@ -184,7 +200,7 @@ async def test_batch_publish_partial_failures(monkeypatch):
 
 
 @pytest.mark.anyio
-async def test_get_results_batch_mixed_missing_and_present():
+async def test_get_results_multiple_ids_mixed_missing_and_present():
     cache = FakeCache()
     redis = FakeRedis(cache.store)
     req = _req_with_state(cache, redis)
@@ -193,7 +209,8 @@ async def test_get_results_batch_mixed_missing_and_present():
     missing_id = "no-1"
     await cache.set_status(present_id, "completed", result={"cnpj": "00.000.000/0001-00"}, extra={"cnpj": "00000000000100"})
 
-    res = await get_results_batch(req, [present_id, missing_id])
+    res = await get_results(req, f"{present_id},{missing_id}")
+    assert isinstance(res, BatchResultsResponse)
     assert len(res.results) == 2
     assert len(res.com_dados) == 1
     assert len(res.sem_dados) == 1

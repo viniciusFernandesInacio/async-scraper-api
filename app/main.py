@@ -22,8 +22,7 @@ logger = structlog.get_logger("api")
 
 description = (
     "API para scraping assíncrono do Sintegra/GO utilizando RabbitMQ e Redis.\n\n"
-    "Fluxo: POST /scrape → task_id → Worker processa → GET /results/{task_id}.\n\n"
-    "Exemplos de CNPJ: 00006486000175, 00012377000160, 00022244000175."
+    "Fluxo: POST /scrape → task_id → Worker processa → GET /results/{task_id}."
 )
 
 openapi_tags = [
@@ -32,7 +31,7 @@ openapi_tags = [
         "description": (
             "Criação e consulta de tarefas de scraping. "
             "Use POST /scrape para um CNPJ ou POST /scrape/batch para vários. "
-            "Consulte com GET /results/{task_id} ou GET /results/batch."
+            "Consulte com GET /results/{task_id} (aceita múltiplos IDs separados por vírgula)."
         ),
     },
     {"name": "system", "description": "Saúde do serviço e métricas básicas."},

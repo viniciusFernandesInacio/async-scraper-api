@@ -8,9 +8,10 @@ from typing import Any
 import re
 
 from fastapi import APIRouter, Request
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.api.schemas import UsuarioResponse
+from app.api.schemas import UsuarioResponse, UsuariosBatchResponse
 from common.config import settings
 from common.db import Usuario, get_engine
 from common.errors import BadRequestError, NotFoundError
@@ -67,24 +68,63 @@ def _usuario_to_dict(u: Usuario) -> dict[str, Any]:
     }
 
 
-def _fetch_usuario_sync(cnpj_digits: str) -> dict[str, Any] | None:
+def _fetch_usuarios_sync(cnpj_digits: list[str]) -> dict[str, dict[str, Any]]:
     engine = get_engine()
     with Session(engine) as session:
-        obj = session.get(Usuario, cnpj_digits)
-        return _usuario_to_dict(obj) if obj else None
+        if not cnpj_digits:
+            return {}
+        stmt = select(Usuario).where(Usuario.cnpj.in_(cnpj_digits))
+        rows = session.execute(stmt).scalars().all()
+        return {row.cnpj: _usuario_to_dict(row) for row in rows}
 
 
 @router.get(
-    "/users/{cnpj}",
-    response_model=UsuarioResponse,
+    "/users/{cnpjs:path}",
+    response_model=UsuarioResponse | UsuariosBatchResponse,
     response_model_exclude_none=True,
-    summary="Consulta usuário por CNPJ no banco",
+    summary="Consulta usuário(s) por CNPJ no banco",
+    description="Envie um ou vários CNPJs separados por vírgula.",
 )
-async def get_usuario(request: Request, cnpj: str) -> UsuarioResponse:
+async def get_usuario(request: Request, cnpjs: str) -> UsuarioResponse | UsuariosBatchResponse:
     if not settings.persist_to_db:
         raise BadRequestError("Persistencia em banco esta desabilitada (PERSIST_TO_DB=false)")
-    cnpj_digits = _normalize_cnpj(cnpj)
-    data = await asyncio.to_thread(_fetch_usuario_sync, cnpj_digits)
-    if not data:
-        raise NotFoundError("Usuario nao encontrado")
-    return UsuarioResponse(**data)
+    raw_values = [value.strip() for value in cnpjs.split(",") if value.strip()]
+    if not raw_values:
+        raise BadRequestError("Forneca ao menos um CNPJ")
+
+    normalized = []
+    for raw in raw_values:
+        normalized.append(_normalize_cnpj(raw))
+
+    unique_digits = list(dict.fromkeys(normalized))
+    data_map = await asyncio.to_thread(_fetch_usuarios_sync, unique_digits)
+    logger = getattr(getattr(request, "app", None), "logger", None)
+
+    if len(raw_values) == 1:
+        digits = unique_digits[0]
+        data = data_map.get(digits)
+        if not data:
+            if logger:
+                logger.info("user_not_found", cnpj=digits)
+            raise NotFoundError("Usuario nao encontrado")
+        if logger:
+            logger.info("user_found", cnpj=digits)
+        return UsuarioResponse(**data)
+
+    encontrados: list[UsuarioResponse] = []
+    nao_encontrados: list[str] = []
+    for digits in unique_digits:
+        data = data_map.get(digits)
+        if data:
+            encontrados.append(UsuarioResponse(**data))
+        else:
+            nao_encontrados.append(digits)
+
+    if logger:
+        logger.info(
+            "users_lookup",
+            total=len(unique_digits),
+            encontrados=len(encontrados),
+            nao_encontrados=nao_encontrados,
+        )
+    return UsuariosBatchResponse(encontrados=encontrados, nao_encontrados=nao_encontrados)

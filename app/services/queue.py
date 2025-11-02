@@ -33,7 +33,7 @@ async def publish_task(task_id: str, cnpj: str) -> None:
             logger.info("rabbitmq_publish", task_id=task_id, queue=queue.name)
         finally:
             await connection.close()
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc: 
         logger.error("rabbitmq_publish_failed", task_id=task_id, error=str(exc))
         raise QueuePublishError(details={"queue": settings.queue_name}) from exc
 
