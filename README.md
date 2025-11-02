@@ -66,6 +66,16 @@ uvicorn app.main:app --reload
 python -m worker.worker
 ```
 
+## Testes
+
+- Com Docker Compose:
+  - `docker compose run --rm api pytest`
+- Ambiente local (venv ativo):
+  - `pytest`
+- Escopos principais:
+  - `tests/test_api_scraping.py` cobre o fluxo de enfileirar e consultar tarefas com cliente HTTP assíncrono.
+  - `tests/test_parser.py` garante o parsing correto dos dados retornados pelo Sintegra.
+
 ## Variáveis de ambiente
 
 - `RABBITMQ_URL` (default `amqp://guest:guest@rabbitmq:5672/`)
